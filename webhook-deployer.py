@@ -34,7 +34,7 @@ def webhook():
     shutil.rmtree(TMP_PATH, ignore_errors=True)
     os.makedirs(TMP_PATH, exist_ok=True)
 
-    subprocess.run(['git', 'clone', '--depth', '1', COMPOSE_REPO, f"{TMP_PATH}/homelab-config"], check=True)
+    subprocess.run(['git', 'clone', '--depth', '1', COMPOSE_REPO, f"{TMP_PATH}/compose"], check=True)
     subprocess.run(['git', 'clone', '--depth', '1', SECRETS_REPO, f"{TMP_PATH}/secrets"], check=True)
 
     print('Replacing config folders...')
