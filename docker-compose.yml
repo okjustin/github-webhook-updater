@@ -1,0 +1,13 @@
+version = '3.8'
+
+services:
+  webhook:
+    build: .
+    container_name: github-webhook-updater
+    ports:
+      - "5005:5005"
+    volumes:
+      - ./test/configs:/app/configs
+      - ./test/secrets:/app/secrets
+    env_file:
+      - .env
