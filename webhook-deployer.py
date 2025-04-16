@@ -57,6 +57,21 @@ def try_pull(command):
         return True
     except subprocess.CalledProcessError:
         return False
+    
+def copy_env_file_if_needed(service_name):
+    compose_path = Path(DEPLOY_BASE) / "compose" / service_name / ".env"
+    secrets_path = Path(DEPLOY_BASE) / "secrets" / service_name / ".env"
+
+    if compose_path.exists():
+        print(f"✅ .env for {service_name} already exists.")
+        return
+
+    if secrets_path.exists():
+        shutil.copy2(secrets_path, compose_path)
+        print(f"🔐 Copied .env for {service_name} from secrets.")
+    else:
+        print(f"⚠️ No .env found for {service_name} in compose or secrets.")
+
 
 def deploy_all_services(compose_dir_names):
     print("Deploying services...")
@@ -66,6 +81,10 @@ def deploy_all_services(compose_dir_names):
     subprocess.run(ssh_command, check=True)
 
     for name in compose_dir_names:
+        print(f"🔍 Preparing {name}...")
+
+        copy_env_file_if_needed(name)
+
         path = f"{SSH_COMPOSE_ROOT}/{name}/docker-compose.yml"
 
         print(f"Deploying {name}...")
