@@ -10,25 +10,23 @@ from pathlib import Path
 app = Flask(__name__)
 PORT = int(os.environ.get("PORT", 5005))
 
-GITHUB_SECRET = os.environ.get("GITHUB_SECRET", "").encode()
+GITHUB_SECRET = os.environ.get("GITHUB_SECRET").encode()
 GITHUB_USERNAME = os.environ.get("GITHUB_USERNAME")
 GITHUB_PAT = os.environ.get("GITHUB_PAT")
-
 COMPOSE_REPO = os.environ.get("COMPOSE_REPO")
 SECRETS_REPO = os.environ.get("SECRETS_REPO")
 
-DEPLOY_BASE = os.environ.get("DEPLOY_BASE", "/opt/docker/homelab-config")
+DEPLOY_BASE = os.environ.get("DEPLOY_BASE")
 
-TMP_PATH = "/tmp/webhook-tmp"
+TMP_PATH = "/tmp"
 
-SSH_USER = os.environ.get("SSH_USER", "justin")
-SSH_TARGET = os.environ.get("SSH_TARGET", "localhost")
-SSH_COMPOSE_ROOT = os.environ.get("SSH_COMPOSE_ROOT", "/opt/docker/homelab-config/compose")
+SSH_USER = os.environ.get("SSH_USER")
+SSH_TARGET = os.environ.get("SSH_TARGET")
+SSH_COMPOSE_ROOT = os.environ.get("SSH_COMPOSE_ROOT")
+
+HOST_DOCKER_PATH = os.environ.get("HOST_DOCKER_PATH")
 
 ENV = os.environ.get("ENV", "production")
-
-DOCKER_PATH = "/usr/local/bin/docker"
-LOCAL_DOCKER_CONFIG = "/app/docker-config"
 
 # --- Utils ---
 def verify_signature(request):
@@ -53,35 +51,42 @@ def replace_folder(target, source):
     shutil.copytree(source, target)
     print(f"Replaced {target} with new contents.")
 
-def ssh_run(ssh_base, cmd_string):
-    """Run a full shell command on the remote via SSH, with proper env + quoting"""
-    full_cmd = ssh_base + ["sh", "-c", cmd_string]
-    print(f"Running SSH command: {' '.join(full_cmd)}")
-    subprocess.run(full_cmd, check=True)
+def try_pull(command):
+    try:
+        subprocess.run(command, shell=True, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 def deploy_all_services(compose_dir_names):
     print("Deploying services...")
 
-    ssh_base = ["ssh", "-i", "/root/.ssh/id_ed25519", f"{SSH_USER}@{SSH_TARGET}"]
-    docker_path = DOCKER_PATH
-    docker_config = LOCAL_DOCKER_CONFIG
+    ssh_command = ["ssh", "-i", "/root/.ssh/id_ed25519", f"{SSH_USER}@{SSH_TARGET}"]
 
-    if os.path.exists(docker_config):
-        print(f"Using isolated Docker config at: {docker_config}")
-    else:
-        print("⚠️ Local Docker config not found, using default Docker settings")
+    subprocess.run(ssh_command, check=True)
 
     for name in compose_dir_names:
         path = f"{SSH_COMPOSE_ROOT}/{name}/docker-compose.yml"
+
         print(f"Deploying {name}...")
 
-        pull_cmd = f'DOCKER_CONFIG="{docker_config}" {docker_path} compose -f "{path}" pull'
-        up_cmd   = f'DOCKER_CONFIG="{docker_config}" {docker_path} compose -f "{path}" up -d'
+        try_pull_command = f'{HOST_DOCKER_PATH} compose -f "{path}" pull'
 
-        ssh_run(ssh_base, pull_cmd)
-        ssh_run(ssh_base, up_cmd)
+        pull_success = try_pull(try_pull_command)
 
-        print(f"✅ Deployed {name}")
+        if not pull_success:
+            print(f"⚠️ Failed to pull image for {name}, it was inaccessible or private, so you may need to log in. Skipping...")
+            continue
+
+        stop_command = f'{HOST_DOCKER_PATH} compose -f "{path}" down'
+
+        start_command = f'{HOST_DOCKER_PATH} compose -f "{path}" up -d'
+
+        subprocess.run(stop_command, shell=True, check=True)
+        print(f"✅ Stopped {name}")
+
+        subprocess.run(start_command, shell=True, check=True)
+        print(f"✅ Started {name}")
 
 # --- Flask Route ---
 @app.route("/payload", methods=["POST"])

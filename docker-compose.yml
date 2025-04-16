@@ -8,6 +8,5 @@ services:
       - "5005:5005"
     volumes:
       - /Users/justin/.ssh/id_ed25519:/root/.ssh/id_ed25519
-      - ./docker-config:/app/docker-config
     env_file:
       - .env
