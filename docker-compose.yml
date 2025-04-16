@@ -7,7 +7,6 @@ services:
     ports:
       - "5005:5005"
     volumes:
-      - ./test/configs:/app/configs
-      - ./test/secrets:/app/secrets
+      - ./test:/host-data
     env_file:
       - .env

@@ -6,58 +6,88 @@ import subprocess
 import shutil
 from pathlib import Path
 
+# --- Config ---
 app = Flask(__name__)
+PORT = int(os.environ.get("PORT", 5005))
 
-# Configuration
-GITHUB_SECRET = os.environ.get('GITHUB_SECRET', '').encode()
-COMPOSE_REPO = os.environ.get('COMPOSE_REPO')
-SECRETS_REPO = os.environ.get('SECRETS_REPO')
-DEPLOY_BASE = os.environ.get('DEPLOY_BASE', '/opt/docker/homelab-config')
-TMP_PATH = 'tmp/homelab-tmp'
+GITHUB_SECRET = os.environ.get("GITHUB_SECRET", "").encode()
+GITHUB_USERNAME = os.environ.get("GITHUB_USERNAME")
+GITHUB_PAT = os.environ.get("GITHUB_PAT")
+COMPOSE_REPO = os.environ.get("COMPOSE_REPO")
+SECRETS_REPO = os.environ.get("SECRETS_REPO")
+DEPLOY_BASE = os.environ.get("DEPLOY_BASE", "/opt/docker/homelab-config")
+TMP_PATH = "/tmp/webhook-tmp"
+ENV = os.environ.get("ENV", "production")
 
-@app.route('/payload', methods=['POST'])
-def webhook():
-  # Verify the request signature
-  signature = request.headers.get('X-Hub-Signature-256')
-  if GITHUB_SECRET and signature:
-    sha_name, signature = signature.split('=')
+# --- Utils ---
+def verify_signature(request):
+    signature = request.headers.get("X-Hub-Signature-256")
+    if not signature:
+        return False
+
+    sha_name, signature = signature.split("=")
     mac = hmac.new(GITHUB_SECRET, msg=request.data, digestmod=hashlib.sha256)
-    if not hmac.compare_digest(mac.hexdigest(), signature):
-      abort(403)
+    return hmac.compare_digest(mac.hexdigest(), signature)
 
-  payload = request.json
-  if payload.get('ref') != 'refs/heads/main':
-    return 'Not a main branch push', 200
-  
-  try:
-    print('Pulling latest changes...')
-    shutil.rmtree(TMP_PATH, ignore_errors=True)
-    os.makedirs(TMP_PATH, exist_ok=True)
+def clone_repo(url, destination):
+    subprocess.run(["git", "clone", "--depth", "1", url, destination], check=True)
 
-    subprocess.run(['git', 'clone', '--depth', '1', COMPOSE_REPO, f"{TMP_PATH}/compose"], check=True)
-    subprocess.run(['git', 'clone', '--depth', '1', SECRETS_REPO, f"{TMP_PATH}/secrets"], check=True)
+def replace_folder(target, source):
+    if os.path.exists(target):
+        print(f"Removing existing folder: {target}")
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
+    shutil.copytree(source, target)
+    print(f"Replaced {target} with new contents.")
 
-    print('Replacing config folders...')
-    shutil.rmtree(DEPLOY_BASE, ignore_errors=True)
-    shutil.copytree(f"{TMP_PATH}/homelab-config", DEPLOY_BASE)
+def deploy_all_services(base_path):
+    print("Deploying services...")
+    for service_dir in Path(f"{base_path}/compose").iterdir():
+        compose_file = service_dir / "docker-compose.yml"
+        if compose_file.exists():
+            print(f"Deploying: {service_dir.name}")
+            subprocess.run(["docker", "compose", "-f", str(compose_file), "pull"], check=True)
+            subprocess.run(["docker", "compose", "-f", str(compose_file), "up", "-d"], check=True)
 
-    print('Replacing secrets folders...')
-    shutil.rmtree(f"{DEPLOY_BASE}/secrets", ignore_errors=True)
-    shutil.copytree(f"{TMP_PATH}/secrets", f"{DEPLOY_BASE}/secrets")
+# --- Flask Route ---
+@app.route("/payload", methods=["POST"])
+def webhook():
+    if ENV == "production" and GITHUB_SECRET and not verify_signature(request):
+        abort(403)
 
-    print('Running docker compose up -d in each folder...')
-    for service_dir in Path(DEPLOY_BASE).iterdir():
-      if (service_dir / 'docker-compose.yml').exists():
-        print(f"Deploying {service_dir.name}...")
-        subprocess.run(['docker', 'compose', '-f', f"{service_dir}/docker-compose.yml", 'pull'], check=True)
-        subprocess.run(['docker', 'compose', '-f', f"{service_dir}/docker-compose.yml", 'up', '-d'], check=True)
+    payload = request.json
+    if payload.get("ref") != "refs/heads/main":
+        return "Not a main branch push", 200
 
-    return 'Deployed!', 200
-  
-  except Exception as e:
-    print(f"Error: {e}")
-    return f"Deploy failed: {e}", 500
-  
-if __name__ == '__main__':
-  port = int(os.environ.get('PORT', 5005))
-  app.run(host="0.0.0.0", port=port)
+    try:
+        print("Starting deployment process...")
+        shutil.rmtree(TMP_PATH, ignore_errors=True)
+        os.makedirs(TMP_PATH, exist_ok=True)
+
+        # Clone compose repo
+        config_repo_url = f"https://github.com/{GITHUB_USERNAME}/{COMPOSE_REPO}.git"
+        clone_repo(config_repo_url, f"{TMP_PATH}/compose")
+
+        # Clone secrets repo (using PAT)
+        secrets_repo_url = f"https://{GITHUB_USERNAME}:{GITHUB_PAT}@github.com/{GITHUB_USERNAME}/{SECRETS_REPO}.git"
+        clone_repo(secrets_repo_url, f"{TMP_PATH}/secrets")
+
+        # Replace configs and secrets
+        replace_folder(os.path.join(DEPLOY_BASE, "compose"), f"{TMP_PATH}/compose")
+        replace_folder(os.path.join(DEPLOY_BASE, "secrets"), f"{TMP_PATH}/secrets")
+
+        # Deploy services
+        deploy_all_services(DEPLOY_BASE)
+
+        print("✅ Deployment complete.")
+        return "Deployed!", 200
+
+    except Exception as e:
+        print(f"❌ Deployment failed: {e}")
+        return f"Deploy failed: {e}", 500
+
+# --- Entry Point ---
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=PORT)
