@@ -16,6 +16,7 @@ GITHUB_PAT = os.environ.get("GITHUB_PAT")
 COMPOSE_REPO = os.environ.get("COMPOSE_REPO")
 SECRETS_REPO = os.environ.get("SECRETS_REPO")
 DEPLOY_BASE = os.environ.get("DEPLOY_BASE", "/opt/docker/homelab-config")
+HOST_DEPLOY_BASE = os.environ.get("HOST_DEPLOY_BASE", DEPLOY_BASE)
 TMP_PATH = "/tmp/webhook-tmp"
 ENV = os.environ.get("ENV", "production")
 
@@ -42,14 +43,24 @@ def replace_folder(target, source):
     shutil.copytree(source, target)
     print(f"Replaced {target} with new contents.")
 
-def deploy_all_services(base_path):
+def deploy_all_services(container_path, host_path):
     print("Deploying services...")
-    for service_dir in Path(f"{base_path}/compose").iterdir():
+
+    container_compose_root = Path(container_path) / "compose"
+    host_compose_root = Path(host_path) / "compose"
+
+    for service_dir in container_compose_root.iterdir():
         compose_file = service_dir / "docker-compose.yml"
         if compose_file.exists():
             print(f"Deploying: {service_dir.name}")
-            subprocess.run(["docker", "compose", "-f", str(compose_file), "pull"], check=True)
-            subprocess.run(["docker", "compose", "-f", str(compose_file), "up", "-d"], check=True)
+
+            host_compose_file = host_compose_root / service_dir.name / "docker-compose.yml"
+
+            subprocess.run(["docker-compose", "-f", str(host_compose_file), "pull"], check=True)
+            subprocess.run(["docker-compose", "-f", str(host_compose_file), "up", "-d"], check=True)
+            print(f"✅ Deployed {service_dir.name}")
+        else:
+            print(f"Skipping {service_dir.name}: No docker-compose.yml found.")
 
 # --- Flask Route ---
 @app.route("/payload", methods=["POST"])
@@ -79,7 +90,10 @@ def webhook():
         replace_folder(os.path.join(DEPLOY_BASE, "secrets"), f"{TMP_PATH}/secrets")
 
         # Deploy services
-        deploy_all_services(DEPLOY_BASE)
+        deploy_all_services(
+            container_path=DEPLOY_BASE,
+            host_path=HOST_DEPLOY_BASE,
+          )
 
         print("✅ Deployment complete.")
         return "Deployed!", 200

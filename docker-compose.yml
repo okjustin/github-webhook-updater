@@ -7,6 +7,7 @@ services:
     ports:
       - "5005:5005"
     volumes:
-      - ./test:/host-data
+      - /Users/justin/Developer/github-webhook-updater/test:/host-data
+      - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
