@@ -24,7 +24,7 @@ SSH_USER = os.environ.get("SSH_USER")
 SSH_TARGET = os.environ.get("SSH_TARGET")
 SSH_COMPOSE_ROOT = os.environ.get("SSH_COMPOSE_ROOT")
 
-HOST_DOCKER_PATH = os.environ.get("HOST_DOCKER_PATH")
+HOST_DOCKER_PATH = os.environ.get("HOST_DOCKER_PATH", "docker")
 
 ENV = os.environ.get("ENV", "production")
 
@@ -77,8 +77,8 @@ def deploy_all_services(compose_dir_names):
     print("Deploying services...")
 
     ssh_command = ["ssh", "-i", "/root/.ssh/id_ed25519", f"{SSH_USER}@{SSH_TARGET}"]
-
-    subprocess.run(ssh_command, check=True)
+    ssh_command = " ".join(ssh_command)
+    print(f"SSH command: {ssh_command}")
 
     for name in compose_dir_names:
         print(f"🔍 Preparing {name}...")
@@ -89,7 +89,9 @@ def deploy_all_services(compose_dir_names):
 
         print(f"Deploying {name}...")
 
-        try_pull_command = f'{HOST_DOCKER_PATH} compose -f "{path}" pull'
+        try_pull_command = f'{ssh_command} {HOST_DOCKER_PATH} compose -f "{path}" pull'
+
+        print(try_pull_command)
 
         pull_success = try_pull(try_pull_command)
 
@@ -97,9 +99,9 @@ def deploy_all_services(compose_dir_names):
             print(f"⚠️ Failed to pull image for {name}, it was inaccessible or private, so you may need to log in. Skipping...")
             continue
 
-        stop_command = f'{HOST_DOCKER_PATH} compose -f "{path}" down'
+        stop_command = f'{ssh_command} {HOST_DOCKER_PATH} compose -f "{path}" down'
 
-        start_command = f'{HOST_DOCKER_PATH} compose -f "{path}" up -d'
+        start_command = f'{ssh_command} {HOST_DOCKER_PATH} compose -f "{path}" up -d'
 
         subprocess.run(stop_command, shell=True, check=True)
         print(f"✅ Stopped {name}")
